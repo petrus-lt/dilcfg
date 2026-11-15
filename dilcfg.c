@@ -410,6 +410,32 @@ static int cmd_dump(int fd)
     return 0;
 }
 
+static int cmd_save(int fd, const char *path)
+{
+    devconf c;
+    if (devconf_fetch(fd, &c) != 0) { fprintf(stderr, "device did not answer any query\n"); return 1; }
+    FILE *f = fopen(path, "w");
+    if (!f) { fprintf(stderr, "open %s: %s\n", path, strerror(errno)); return 1; }
+    fprintf(f, "# dilcfg save - diLogger configuration read from the device\n");
+    if (c.have & F_VER) fprintf(f, "# firmware %s\n", c.version);
+    fprintf(f, "\n");
+    if (c.have & F_BAUD)   fprintf(f, "baudrate %ld\n",   c.baud);
+    if (c.have & F_STOP)   fprintf(f, "stopbit %s\n",     stop_word(c.stop_code));
+    if (c.have & F_PARITY) fprintf(f, "parity %s\n",      parity_word(c.parity));
+    if (c.have & F_MB)     fprintf(f, "filemb %d\n",      c.mb);
+    if (c.have & F_UT)     fprintf(f, "timestamp %s\n",   bool_word(c.ut));
+    if (c.have & F_HX)     fprintf(f, "hexlog %s\n",      bool_word(c.hx));
+    if (c.have & F_FN)     fprintf(f, "filenew %s\n",     bool_word(c.fn));
+    if (c.have & F_TIME) {
+        fprintf(f, "\n# device clock was %04d-%02d-%02d %02d:%02d:%02d at save time;\n", c.y, c.mo, c.d, c.h, c.mi, c.se);
+        fprintf(f, "# uncomment to push that (past) time back, or use 'sync' for the host clock:\n");
+        fprintf(f, "# time %d %d %d %d %d %d\n", c.y, c.mo, c.d, c.h, c.mi, c.se);
+    }
+    if (fclose(f) != 0) { fprintf(stderr, "close %s: %s\n", path, strerror(errno)); return 1; }
+    printf("saved to %s\n", path);
+    return 0;
+}
+
 static void usage_help(void)
 {
     printf(
@@ -427,6 +453,7 @@ static void usage_help(void)
       "  reset                     reboot device\n"
       "  default                   restore factory settings\n"
       "  dump                      show current device configuration\n"
+      "  save [file]               write current device config to file (load with -f)\n"
       "  raw <text...>             send <text> verbatim (AT terminal)\n"
       "  verbose [on|off]          echo outgoind commands (default: off)\n"
       "  help, quit\n");
@@ -445,6 +472,11 @@ static int run_tui(int fd)
         if (!strcmp(p,"q") || !strcmp(p,"quit") || !strcmp(p,"exit")) break;
         if (!strcmp(p,"h") || !strcmp(p,"help") || !strcmp(p,"?")) { usage_help(); continue; }
         if (!strcmp(p,"dump")) { cmd_dump(fd); continue; }
+        if (!strcmp(p,"save") || !strncmp(p,"save ",5)) {
+            const char *a = p + 4; while (*a == ' ') a++;
+            cmd_save(fd, *a ? a : "dilcfg-save.conf");
+            continue;
+        }
         if (!strcmp(p,"verbose") || !strncmp(p,"verbose ",8)) {
                 const char *a = p + 7; while (*a == ' ') a++;
                 if (!*a)                              g_verbose = !g_verbose;
@@ -507,6 +539,10 @@ int main(int argc, char **argv)
     else if (onecmd)  {
         char wire[384], rx[2048];
         if (!strcmp(onecmd, "dump")) { rc = cmd_dump(g_fd); goto done; }
+        if (!strncmp(onecmd, "save", 4) && (onecmd[4] == '\0' || onecmd[4] == ' ')) {
+            const char *a = onecmd + 4; while (*a == ' ') a++;
+            rc = cmd_save(g_fd, *a ? a : "dilcfg-save.conf"); goto done;
+        }
         if (build_command(onecmd, wire, sizeof(wire)) == 0) {
             if (g_verbose) printf("  > %s\n", wire);
             int n = serial_send_and_read(g_fd, wire, 300, rx, sizeof(rx));
