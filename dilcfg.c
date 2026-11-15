@@ -338,6 +338,78 @@ static int run_config(int fd, const char *path)
     return rc;
 }
 
+/* ------------------------------------------------------------------ */
+/* device snapshot                                                     */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    long baud; int stop_code, parity, mb, ut, hx, fn;
+    int y, mo, d, h, mi, se;
+    char version[64];
+    unsigned have;            /* bit i set = field i parsed */
+} devconf;
+
+enum { F_BAUD=1, F_STOP=2, F_PARITY=4, F_MB=8, F_UT=16, F_HX=32,
+    F_FN=64, F_TIME=128, F_VER=256 };
+
+static int devconf_fetch(int fd, devconf *c)
+{
+    static const char *queries[] = {
+        "param baudrate", "param stopbit", "param parity", "param filemb",
+        "param usetime", "param hexlog", "param filenew",
+        "time", "system version"
+    };
+    char rx[4096]; size_t off = 0; char part[1024]; char *p;
+    memset(c, 0, sizeof(*c));
+    rx[0] = '\0';
+    for (size_t i = 0; i < sizeof(queries)/sizeof(queries[0]); i++) {
+        int n = serial_send_and_read(fd, queries[i], 250, part, sizeof(part));
+        if (n > 0 && off + (size_t)n < sizeof(rx) - 1) {
+            memcpy(rx + off, part, (size_t)n); off += (size_t)n; rx[off] = '\0';
+        }
+    }
+    if ((p = strstr(rx, "baudrate:")))     { sscanf(p + 9,  "%ld", &c->baud);      c->have |= F_BAUD; }
+    if ((p = strstr(rx, "stop_bit:")))     { sscanf(p + 9,  "%d", &c->stop_code);  c->have |= F_STOP; }
+    if ((p = strstr(rx, "parity:")))       { sscanf(p + 7,  "%d", &c->parity);     c->have |= F_PARITY; }
+    if ((p = strstr(rx, "file_mb:")))      { sscanf(p + 8,  "%d", &c->mb);         c->have |= F_MB; }
+    if ((p = strstr(rx, "log_use_time:"))) { sscanf(p + 13, "%d", &c->ut);         c->have |= F_UT; }
+    if ((p = strstr(rx, "hex_log:")))      { sscanf(p + 8,  "%d", &c->hx);         c->have |= F_HX; }
+    if ((p = strstr(rx, "filenew:")))      { sscanf(p + 8,  "%d", &c->fn);         c->have |= F_FN; }
+    if ((p = strstr(rx, "system version:"))) { sscanf(p + 15, "%63s", c->version); c->have |= F_VER; }
+    for (p = rx; (p = strchr(p, '>')) != NULL; p++)
+        if (sscanf(p + 1, " %d-%d-%d %d:%d:%d", &c->y, &c->mo, &c->d, &c->h, &c->mi, &c->se) == 6) {
+            c->have |= F_TIME; break;
+        }
+    return c->have ? 0 : -1;
+}
+
+static const char *stop_word(int code)
+{
+    return code == 3 ? "1.5" : code == 2 ? "2" : code == 1 ? "1" : "?";
+}
+static const char *parity_word(int p)
+{
+    return p == 0 ? "none" : p == 1 ? "odd" : p == 2 ? "even" : "?";
+}
+static const char *bool_word(int v) { return v ? "on" : "off"; }
+
+static int cmd_dump(int fd)
+{
+    devconf c;
+    if (devconf_fetch(fd, &c) != 0) { fprintf(stderr, "device did not answer any query\n"); return 1; }
+    printf("device configuration:\n");
+    if (c.have & F_BAUD)   printf("  baudrate     : %ld\n", c.baud);
+    if (c.have & F_STOP)   printf("  stop bits    : %s\n", stop_word(c.stop_code));
+    if (c.have & F_PARITY) printf("  parity       : %s\n", parity_word(c.parity));
+    if (c.have & F_MB)     printf("  log file max : %d MB\n", c.mb);
+    if (c.have & F_UT)     printf("  timestamp    : %s\n", bool_word(c.ut));
+    if (c.have & F_HX)     printf("  hex log      : %s\n", bool_word(c.hx));
+    if (c.have & F_FN)     printf("  new file/boot: %s\n", bool_word(c.fn));
+    if (c.have & F_TIME)   printf("  device clock : %04d-%02d-%02d %02d:%02d:%02d\n", c.y, c.mo, c.d, c.h, c.mi, c.se);
+    if (c.have & F_VER)    printf("  firmware     : %s\n", c.version);
+    return 0;
+}
+
 static void usage_help(void)
 {
     printf(
@@ -354,6 +426,7 @@ static void usage_help(void)
       "  version                   firmware version\n"
       "  reset                     reboot device\n"
       "  default                   restore factory settings\n"
+      "  dump                      show current device configuration\n"
       "  raw <text...>             send <text> verbatim (AT terminal)\n"
       "  verbose [on|off]          echo outgoind commands (default: off)\n"
       "  help, quit\n");
@@ -371,6 +444,7 @@ static int run_tui(int fd)
         if (!*p) continue;
         if (!strcmp(p,"q") || !strcmp(p,"quit") || !strcmp(p,"exit")) break;
         if (!strcmp(p,"h") || !strcmp(p,"help") || !strcmp(p,"?")) { usage_help(); continue; }
+        if (!strcmp(p,"dump")) { cmd_dump(fd); continue; }
         if (!strcmp(p,"verbose") || !strncmp(p,"verbose ",8)) {
                 const char *a = p + 7; while (*a == ' ') a++;
                 if (!*a)                              g_verbose = !g_verbose;
@@ -432,6 +506,7 @@ int main(int argc, char **argv)
     if (cfgfile)      rc = run_config(g_fd, cfgfile);
     else if (onecmd)  {
         char wire[384], rx[2048];
+        if (!strcmp(onecmd, "dump")) { rc = cmd_dump(g_fd); goto done; }
         if (build_command(onecmd, wire, sizeof(wire)) == 0) {
             if (g_verbose) printf("  > %s\n", wire);
             int n = serial_send_and_read(g_fd, wire, 300, rx, sizeof(rx));
@@ -443,6 +518,7 @@ int main(int argc, char **argv)
         }
     }
     else rc = run_tui(g_fd);
+done:
 
     close(g_fd);
     return rc;
