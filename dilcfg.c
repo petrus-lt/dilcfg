@@ -30,7 +30,7 @@
 #define PROMPT "dil> "
 
 static int g_fd = -1;
-static int g_verbose = 1;
+static int g_verbose = 0;
 static int g_stop = 0;
 
 static void on_sigint(int sig) { (void)sig; g_stop = 1; }
@@ -306,7 +306,7 @@ static void pretty_print_rx(const char *rx)
         while (*s && *s != '\r' && *s != '\n' && i < sizeof(linebuf)-1) linebuf[i++] = *s++;
         linebuf[i] = '\0';
         while (*s == '\r' || *s == '\n') s++;
-        if (i) printf("  < %s\n", linebuf);
+	if (i) { booleans_to_onoff(linebuf); printf("  < %s\n", linebuf); }
     }
 }
 
@@ -355,6 +355,7 @@ static void usage_help(void)
       "  reset                     reboot device\n"
       "  default                   restore factory settings\n"
       "  raw <text...>             send <text> verbatim (AT terminal)\n"
+      "  verbose [on|off]          echo outgoind commands (default: off)\n"
       "  help, quit\n");
 }
 
@@ -370,6 +371,15 @@ static int run_tui(int fd)
         if (!*p) continue;
         if (!strcmp(p,"q") || !strcmp(p,"quit") || !strcmp(p,"exit")) break;
         if (!strcmp(p,"h") || !strcmp(p,"help") || !strcmp(p,"?")) { usage_help(); continue; }
+        if (!strcmp(p,"verbose") || !strncmp(p,"verbose ",8)) {
+                const char *a = p + 7; while (*a == ' ') a++;
+                if (!*a)                              g_verbose = !g_verbose;
+                else if (!strcmp(a,"on")  || !strcmp(a,"1"))  g_verbose = 1;
+                else if (!strcmp(a,"off") || !strcmp(a,"0"))  g_verbose = 0;
+                else { printf("verbose: on|off\n"); continue; }
+                printf("verbose %s\n", g_verbose ? "on" : "off");
+                continue;
+        }
         const char *eff = p;
         char rawbuf[256];
         if (!strncmp(p, "raw ", 4)) {
@@ -393,16 +403,17 @@ int main(int argc, char **argv)
     const char *cfgfile = NULL, *onecmd = NULL, *port = NULL;
     long baud = 115200;
     int c;
-    while ((c = getopt(argc, argv, "f:c:b:qhV")) != -1) {
+    while ((c = getopt(argc, argv, "f:c:b:qvhV")) != -1) {
         switch (c) {
         case 'f': cfgfile = optarg; break;
         case 'c': onecmd = optarg; break;
         case 'b': baud = atol(optarg); break;
-        case 'q': g_verbose = 0; break;
+        case 'q': g_verbose = 0; break;  /* kept for compatibility; now the default */
+        case 'v': g_verbose = 1; break;
         case 'V': printf(APP "\n"); return 0;
         default:
             fprintf(stderr,
-                "usage: %s [-b baud] [-f config | -c 'cmd'] PORT\n"
+                "usage: %s [-b baud] [-v] [-f config | -c 'cmd'] PORT\n"
                 "  e.g. %s /dev/ttyUSB0          (interactive)\n"
                 "       %s -f logger.conf /dev/ttyUSB0\n"
                 "       %s -c version /dev/ttyS1\n", argv[0], argv[0], argv[0], argv[0]);
