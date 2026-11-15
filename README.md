@@ -38,6 +38,9 @@ Interactive:
     dil> baudrate 9600       # set
     dil> parity odd
     dil> sync                # device clock <- host clock
+    dil> dump                # whole device config, parsed and pretty-printed
+    dil> save backup.conf    # write it to a file loadable with -f
+    dil> verbose on          # also echo the outgoing command (off by default)
     dil> raw AT              # verbatim line (AT-terminal style)
 
 Batch from a config file (see `logger.conf`):
@@ -48,6 +51,19 @@ One-shot (scriptable):
 
     ./dilcfg -c 'baudrate 19200' /dev/ttyUSB0
     ./dilcfg -c version /dev/ttyUSB0
+    ./dilcfg -c dump /dev/ttyUSB0
+    ./dilcfg -c 'save backup.conf' /dev/ttyUSB0   # backup current device config
+
+`save` reads every setting from the device and writes a file ready for
+`-f` (or for git, diffing, restoring). The device clock line is written
+commented-out so an old timestamp is never pushed back accidentally;
+use `sync` to set the host clock instead.
+
+Verbosity: by default only the device's replies are printed. `-v` (CLI) or
+`verbose on|off` (TUI, bare `verbose` toggles) additionally echo the
+outgoing wire commands. `-q` still works for compatibility. Boolean
+settings (`timestamp`, `hexlog`, `filenew`) are shown as `on`/`off`
+instead of the raw `1`/`0` — display only, the wire format is unchanged.
 
 ## Protocol (reverse-engineered, exact wire format)
 
@@ -70,7 +86,11 @@ goes idle (~300 ms), 10 ms inter-command delay:
 
 Reply text is whatever the firmware prints; `dilcfg` displays it verbatim
 (the Windows tool never parses replies either — it just shows the raw
-stream, so reply formats are firmware-dependent).
+stream, so reply formats are firmware-dependent). Confirmed reply tokens
+on firmware `0203-240411`: `> baudrate:115200`, `> stop_bit:1`,
+`> parity:0`, `> file_mb:30`, `> log_use_time:0`, `> hex_log:0`,
+`> filenew:0`, `> 2026-11-15 19:08:56,week:0`, `> system version:0203-240411`,
+`> WorkParam Saved.` after a set; the device also echoes the sent line.
 
 A plain `AT` test only applies to DSD TECH's WiFi modules (SH-W08A tab);
 diLogger configuration uses the commands above.
