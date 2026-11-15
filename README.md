@@ -79,7 +79,7 @@ diLogger configuration uses the commands above.
 
 On the host physically wired to the diLogger ("devhost"):
 
-    socat /dev/ttyACM0,b115200,raw,echo=0 tcp-listen:4000,reuseaddr
+    socat /dev/ttyUSB0,b115200,raw,echo=0 tcp-listen:4000,reuseaddr
 
 On your workstation, expose it as a local PTY and point dilcfg at it:
 
