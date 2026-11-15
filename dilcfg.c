@@ -455,7 +455,7 @@ static void usage_help(void)
       "  dump                      show current device configuration\n"
       "  save [file]               write current device config to file (load with -f)\n"
       "  raw <text...>             send <text> verbatim (AT terminal)\n"
-      "  verbose [on|off]          echo outgoind commands (default: off)\n"
+      "  verbose [on|off]          echo outgoing commands (default: off)\n"
       "  help, quit\n");
 }
 
