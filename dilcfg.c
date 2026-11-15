@@ -272,6 +272,31 @@ static int build_command(const char *line_in, char wire[], size_t cap)
     return 0;
 }
 
+/* display-only: show 0/1 of boolean settings as off/on (wire unchanged) */
+static void booleans_to_onoff(char *buf)
+{
+    static const char *keys[] = {"log_use_time:", "usetime ",
+                                 "hex_log:", "hexlog ",
+                                 "filenew:", "filenew "};
+    for (size_t k = 0; k < sizeof(keys)/sizeof(keys[0]); k++) {
+        size_t klen = strlen(keys[k]);
+        char *p = buf;
+        while ((p = strstr(p, keys[k])) != NULL) {
+            char *d = p + klen;
+            if ((*d == '0' || *d == '1') && !isdigit((unsigned char)d[1])) {
+                const char *rep = (*d == '1') ? "on" : "off";
+                size_t rlen = strlen(rep);
+                size_t tail = strlen(d + 1);
+                memmove(d + rlen, d + 1, tail + 1);
+                memcpy(d, rep, rlen);
+                p = d + rlen;
+            } else {
+                p += klen;
+            }
+        }
+    }
+}
+
 static void pretty_print_rx(const char *rx)
 {
     /* print with CRLF normalized, indented */
@@ -378,7 +403,7 @@ int main(int argc, char **argv)
         default:
             fprintf(stderr,
                 "usage: %s [-b baud] [-f config | -c 'cmd'] PORT\n"
-                "  e.g. %s /dev/ttyACM0          (interactive)\n"
+                "  e.g. %s /dev/ttyUSB0          (interactive)\n"
                 "       %s -f logger.conf /dev/ttyUSB0\n"
                 "       %s -c version /dev/ttyS1\n", argv[0], argv[0], argv[0], argv[0]);
             return 2;
